@@ -1,24 +1,11 @@
-name: Build and Release
+name: Build
 
 on:
-  push:
-    branches:
-      - main
   release:
     types: [created]
 
 jobs:
-  create-release:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Create GitHub Release
-        uses: taiki-e/create-gh-release-action@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
   upload-assets:
-    needs: create-release
     strategy:
       matrix:
         include:
@@ -31,19 +18,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          target: ${{ matrix.target }}
-          override: true
-      - name: Build binary
-        run: cargo build --release --target ${{ matrix.target }}
-      - name: Upload release asset
-        uses: taiki-e/upload-rust-binary-action@v1
+      - uses: taiki-e/upload-rust-binary-action@v1
         with:
           bin: emo
           target: ${{ matrix.target }}
-          tar: none
-          zip: none
           token: ${{ secrets.GITHUB_TOKEN }}
