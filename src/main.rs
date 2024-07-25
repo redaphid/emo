@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
-use regex::Regex;
 use std::env;
-use std::fs;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct EmojiRecord {
@@ -15,19 +13,16 @@ struct EmojiRecord {
 
 fn main() {
     let search_term = env::args().nth(1).expect("Usage: <search_term>");
-    let file_path = "emojis.json";
-
+    let num_results: usize = env::args().nth(2).map_or(usize::MAX, |arg| arg.parse().expect("Invalid number of results"));
     // Read the JSON file
-    let data = fs::read_to_string(file_path).expect("Unable to read file");
+    let data = include_str!("../emojis.json");
     // Parse the JSON data
     let emojis: Vec<EmojiRecord> = serde_json::from_str(&data).expect("JSON was not well-formatted");
 
-    // Create the regex for fuzzy search
-    let search_regex = Regex::new(&format!("(?i){}", search_term)).expect("Invalid regex");
-
     // Search for the keyword and print the corresponding emoji
+    let mut count = 0;
     for emoji in emojis {
-        if emoji.keywords.iter().any(|keyword| search_regex.is_match(keyword)) {
+        if emoji.keywords.iter().any(|keyword| keyword.contains(&search_term)) {
             let codepoints: Vec<String> = emoji.unicode.split_whitespace().map(|codepoint| {
                 let codepoint = codepoint.trim_start_matches("U+");
                 let codepoint = u32::from_str_radix(codepoint, 16).expect("Invalid unicode codepoint");
@@ -35,6 +30,10 @@ fn main() {
             }).collect();
             let emoji_string = codepoints.join("\u{200D}"); // Zero-width joiner
             println!("{}", emoji_string);
+            count+=1;
+            if count >= num_results {
+                return;
+            }
         }
     }
 }
