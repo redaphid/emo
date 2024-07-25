@@ -1,31 +1,28 @@
-name: Create Release
-
 on:
   push:
     branches:
       - main
 
+name: Create Release
+
 jobs:
-  create-release:
+  build:
+    name: Create Release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-
-      - name: Set up Git
-        run: |
-          git config --global user.name 'github-actions'
-          git config --global user.email 'github-actions@github.com'
-
-      - name: Get the latest commit hash
-        id: get_commit
-        run: echo "::set-output name=commit::$(git rev-parse HEAD)"
-
-      - name: Create GitHub Release
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Create Release
+        id: create_release
         uses: actions/create-release@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
         with:
-          tag_name: ${{ steps.get_commit.outputs.commit }}
-          release_name: Release ${{ steps.get_commit.outputs.commit }}
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          body: |
+            Changes in this Release
+            - First Change
+            - Second Change
           draft: false
           prerelease: false
