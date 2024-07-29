@@ -20,7 +20,7 @@ fn main() {
 
     let mut count = 0;
     for emoji in emojis {
-        if emoji.keywords.iter().any(|keyword| keyword == &search_term) {
+        if emoji.keywords.iter().any(|keyword| keyword.contains(&search_term)) {
             let codepoint = emoji.unicode.split_whitespace().next().expect("No codepoint found");
             let codepoint = codepoint.trim_start_matches("U+");
             let codepoint = u32::from_str_radix(codepoint, 16).expect("Invalid unicode codepoint");
