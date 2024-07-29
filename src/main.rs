@@ -34,7 +34,7 @@ fn main() {
     }).unwrap_or(1);
 
     // Determine search term, ignoring flags
-    let search_term = args.iter().find(|&&ref arg| !arg.starts_with('-') && arg != &args[0]).expect("Usage: <search_term> [-n] [-c <count>]");
+    let search_term = args.iter().skip(1).find(|&&ref arg| !arg.starts_with('-')).expect("Usage: <search_term> [-n] [-c <count>]");
 
     let emojis: Vec<EmojiRecord> = serde_json::from_str(include_str!("../emojis.json")).unwrap();
 
