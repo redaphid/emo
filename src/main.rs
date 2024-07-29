@@ -1,6 +1,6 @@
+use clap::{value_parser, Arg, Command};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::env;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct EmojiRecord {
@@ -25,16 +25,28 @@ fn print_emoji(emoji: &EmojiRecord, printed_emojis: &mut HashSet<char>, count: &
 }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    let show_name = args.contains(&"-n".to_string());
+    let matches = Command::new("emoji_search")
+        .version("1.0")
+        .arg(Arg::new("search_term")
+            .help("The term to search for")
+            .required(true)
+            .index(1))
+        .arg(Arg::new("name")
+            .short('n')
+            .long("name")
+            .help("Show emoji names"))
+        .arg(Arg::new("count")
+            .short('c')
+            .value_parser(value_parser!(usize))
+            .long("count")
+            .help("Number of results to show")
+            .default_value("1")
+          )
+        .get_matches();
 
-    // Extract the count if provided
-    let count_index = args.iter().position(|arg| arg == "-c").and_then(|index| {
-        args.get(index + 1).and_then(|count_str| count_str.parse().ok())
-    }).unwrap_or(1);
-
-    // Determine search term, ignoring flags
-    let search_term = args.iter().skip(1).find(|&&ref arg| !arg.starts_with('-')).expect("Usage: <search_term> [-n] [-c <count>]");
+    let show_name = matches.contains_id("name");
+    let num_results = *matches.get_one::<usize>("count").unwrap();
+    let search_term = matches.get_one::<String>("search_term").unwrap();
 
     let emojis: Vec<EmojiRecord> = serde_json::from_str(include_str!("../emojis.json")).unwrap();
 
@@ -42,16 +54,16 @@ fn main() {
     let mut count = 0;
 
     for emoji in &emojis {
-        if emoji.name == *search_term || emoji.keywords.iter().any(|k| k.contains(search_term)) {
+        if emoji.name.contains(search_term) || emoji.keywords.iter().any(|k| k.contains(search_term)) {
             print_emoji(emoji, &mut printed_emojis, &mut count, show_name);
-            if count >= count_index { return; }
+            if count >= num_results { return; }
         }
     }
 
     for emoji in &emojis {
         if emoji.definition.as_deref().map_or(false, |d| d.contains(search_term)) {
             print_emoji(emoji, &mut printed_emojis, &mut count, show_name);
-            if count >= count_index { return; }
+            if count >= num_results { return; }
         }
     }
 }
