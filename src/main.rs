@@ -36,6 +36,10 @@ fn main() {
     let mut count = 0;
 
     for emoji in &emojis {
+        if emoji.name == search_term {
+            print_emoji(emoji, &mut printed_emojis, &mut count);
+            return;
+        }
         if emoji.keywords.iter().any(|keyword| keyword.contains(&search_term)) {
             print_emoji(emoji, &mut printed_emojis, &mut count);
 
