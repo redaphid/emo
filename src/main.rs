@@ -1,4 +1,4 @@
-use clap::{value_parser, Arg, Command};
+use clap::{Parser};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -24,29 +24,21 @@ fn print_emoji(emoji: &EmojiRecord, printed_emojis: &mut HashSet<char>, count: &
     }
 }
 
+#[derive(Parser)]
+#[command(version = None)]
+struct Cli {
+    #[arg(short, long, default_value_t = 1, help = "number of results to show")]
+    count: usize,
+    #[arg(short, long, default_value_t = false, help = "show emoji names")]
+    name:bool,
+    search_term: String,
+}
 fn main() {
-    let matches = Command::new("emoji_search")
-        .version("1.0")
-        .arg(Arg::new("search_term")
-            .help("The term to search for")
-            .required(true)
-            .index(1))
-        .arg(Arg::new("name")
-            .short('n')
-            .long("name")
-            .help("Show emoji names"))
-        .arg(Arg::new("count")
-            .short('c')
-            .value_parser(value_parser!(usize))
-            .long("count")
-            .help("Number of results to show")
-            .default_value("1")
-          )
-        .get_matches();
+    let cmd = Cli::parse();
+    let search_term = &cmd.search_term;
+    let show_name = cmd.name;
+    let num_results = cmd.count;
 
-    let show_name = matches.contains_id("name");
-    let num_results = *matches.get_one::<usize>("count").unwrap();
-    let search_term = matches.get_one::<String>("search_term").unwrap();
 
     let emojis: Vec<EmojiRecord> = serde_json::from_str(include_str!("../emojis.json")).unwrap();
 
