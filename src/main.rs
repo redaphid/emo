@@ -32,15 +32,31 @@ struct Cli {
     #[arg(short, long, default_value_t = false, help = "show emoji names")]
     name:bool,
     search_term: String,
+    #[arg(short, long, default_value_t = false, help = "define the specified emoji")]
+    define:bool,
 }
 fn main() {
     let cmd = Cli::parse();
     let search_term = &cmd.search_term;
     let show_name = cmd.name;
     let num_results = cmd.count;
-
+    let define = cmd.define;
 
     let emojis: Vec<EmojiRecord> = serde_json::from_str(include_str!("../emojis.json")).unwrap();
+
+    if define {
+        // get search term as unicode code. iterate through the emojis, split the 'unicode' property and compare the first character with the search term
+        // if it matches, print the emoji
+        for emoji in &emojis {
+           for unicode in emoji.unicode.split_whitespace() {
+               let emoji_char = char::from_u32(u32::from_str_radix(unicode.trim_start_matches("U+"), 16).unwrap()).unwrap();
+               if emoji_char == search_term.chars().next().unwrap(){
+                   println!("{} - {}", emoji_char, emoji.definition.as_ref().unwrap());
+               }
+           }
+        }
+        return;
+    }
 
     let mut printed_emojis = HashSet::new();
     let mut count = 0;
