@@ -53,9 +53,9 @@ fn main() {
                let emoji_char = char::from_u32(u32::from_str_radix(unicode.trim_start_matches("U+"), 16).unwrap()).unwrap();
                if emoji_char == search_term.chars().next().unwrap(){
                    println!("{} - {}", emoji_char, emoji.definition.as_ref().unwrap());
+                   count += 1;
+                   if count >= num_results { return; }
                }
-               count += 1;
-               if count >= num_results { return; }
            }
         }
         return;
