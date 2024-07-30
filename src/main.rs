@@ -41,6 +41,7 @@ fn main() {
     let show_name = cmd.name;
     let num_results = cmd.count;
     let define = cmd.define;
+    let mut count = 0;
 
     let emojis: Vec<EmojiRecord> = serde_json::from_str(include_str!("../emojis.json")).unwrap();
 
@@ -53,13 +54,14 @@ fn main() {
                if emoji_char == search_term.chars().next().unwrap(){
                    println!("{} - {}", emoji_char, emoji.definition.as_ref().unwrap());
                }
+               count += 1;
+               if count >= num_results { return; }
            }
         }
         return;
     }
 
     let mut printed_emojis = HashSet::new();
-    let mut count = 0;
 
     for emoji in &emojis {
         if emoji.name.contains(search_term) || emoji.keywords.iter().any(|k| k.contains(search_term)) {
