@@ -17,6 +17,13 @@ struct EmojiMappings {
     mappings: std::collections::HashMap<String, String>,
 }
 
+fn load_emojis() -> Vec<EmojiRecord> {
+    let emojis: Vec<EmojiRecord> = serde_json::from_str(include_str!("../emojis.json")).unwrap();
+    emojis
+        .into_iter()
+        .filter(|e| !e.unicode.contains(' '))
+        .collect()
+}
 impl EmojiMappings {
     fn load() -> Self {
         let path = dirs::config_dir()
@@ -63,6 +70,13 @@ struct Cli {
         help = "save a mapping for the search term to a specific emoji or index"
     )]
     save: Option<String>,
+    #[arg(
+        short = 'e',
+        long,
+        default_value_t = false,
+        help = "erase the mapping for the specified search term"
+    )]
+    erase: bool,
     #[arg(short = 'n', long, help = "display the number of a given emoji result")]
     number: bool,
     #[arg(trailing_var_arg = true)]
@@ -92,7 +106,7 @@ fn to_char(emoji: &EmojiRecord) -> char {
     .unwrap()
 }
 
-fn find_emojis<'a>(
+fn search<'a>(
     emojis: &'a [EmojiRecord],
     search_term: &str,
     num_results: usize,
@@ -139,14 +153,16 @@ fn find_emojis<'a>(
     // Try each predicate in order until we have enough results
     for predicate in predicates {
         for emoji in emojis {
-            if predicate(emoji) {
-                let c = to_char(emoji);
-                if seen.insert(c) {
-                    results.push((c, emoji));
-                    if results.len() >= num_results {
-                        return results;
-                    }
-                }
+            if !predicate(emoji) {
+                continue;
+            }
+            let c = to_char(emoji);
+            if !seen.insert(c) {
+                continue;
+            }
+            results.push((c, emoji));
+            if results.len() >= num_results {
+                return results;
             }
         }
     }
@@ -154,7 +170,7 @@ fn find_emojis<'a>(
     results
 }
 
-fn print_emojis(results: &[(char, &EmojiRecord)], show_number: bool) {
+fn print(results: &[(char, &EmojiRecord)], show_number: bool) {
     for (i, (emoji_char, _)) in results.iter().enumerate() {
         let prefix = if show_number {
             format!("{}. ", i + 1)
@@ -166,34 +182,112 @@ fn print_emojis(results: &[(char, &EmojiRecord)], show_number: bool) {
     }
 }
 
-fn search_emojis(emojis: &[EmojiRecord], search_term: &str, num_results: usize, show_number: bool) {
-    let results = find_emojis(emojis, search_term, num_results);
-    print_emojis(&results, show_number);
+fn handle_search(search_term: &str, num_results: usize, show_number: bool) {
+    let emojis = load_emojis();
+    let results = search(&emojis, search_term, num_results);
+    print(&results, show_number);
 }
 
 // Function to handle the define mode
-fn handle_define(emojis: &[EmojiRecord], search_term: &str) -> std::io::Result<()> {
-    let first_char = search_term.chars().next().unwrap();
-
-    for emoji in emojis {
-        let emoji_char = to_char(emoji);
-        if emoji_char == first_char {
-            let name = &emoji.name;
-            let description = emoji.definition.as_deref().unwrap_or("");
-            try_print(&format!("{} - {} {}", emoji_char, name, description));
-            return Ok(());
-        }
+fn handle_define(search_term: &str) -> std::io::Result<()> {
+    if search_term.is_empty() {
+        return Ok(());
     }
 
-    // If exact emoji not found, fall back to search
-    let results = find_emojis(emojis, search_term, 1);
-    if !results.is_empty() {
-        let (emoji_char, emoji) = &results[0];
+    let emojis = load_emojis();
+    let first_char = search_term.chars().next().unwrap();
+
+    // Try direct lookup first
+    for emoji in &emojis {
+        let emoji_char = to_char(emoji);
+        if emoji_char != first_char {
+            continue;
+        }
         let name = &emoji.name;
         let description = emoji.definition.as_deref().unwrap_or("");
         try_print(&format!("{} - {} {}", emoji_char, name, description));
+        return Ok(());
     }
 
+    // If exact emoji not found, fall back to search
+    let results = search(&emojis, search_term, 1);
+    if results.is_empty() {
+        return Ok(());
+    }
+
+    let (emoji_char, emoji) = &results[0];
+    let name = &emoji.name;
+    let description = emoji.definition.as_deref().unwrap_or("");
+    try_print(&format!("{} - {} {}", emoji_char, name, description));
+    Ok(())
+}
+
+fn is_number(s: &str) -> bool {
+    s.parse::<usize>().is_ok()
+}
+
+fn handle_save(emoji_to_save: &str, search_term: &str) -> std::io::Result<()> {
+    if search_term.is_empty() || emoji_to_save.is_empty() {
+        eprintln!("Error: Cannot save mapping for empty search term or emoji");
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "Cannot save mapping for empty search term or emoji",
+        ));
+    }
+
+    let mut mappings = EmojiMappings::load();
+
+    if is_number(emoji_to_save) {
+        let index = emoji_to_save.parse::<usize>().unwrap();
+        let emojis = load_emojis();
+        let results = search(&emojis, search_term, index.max(1));
+
+        let (emoji_char, _) = results[index - 1];
+        let emoji_str = emoji_char.to_string();
+
+        // Clone emoji_str before inserting
+        mappings
+            .mappings
+            .insert(search_term.to_string(), emoji_str.clone());
+        mappings.save()?;
+
+        // Print confirmation with the emoji
+        try_print(&format!("{} ➡ {} ✅", search_term, emoji_str));
+        return Ok(());
+    }
+
+    // Extract just the first character as the emoji
+    let emoji_char = emoji_to_save.chars().next().unwrap_or('?');
+    let emoji_str = emoji_char.to_string();
+
+    // Clone emoji_str before inserting
+    mappings
+        .mappings
+        .insert(search_term.to_string(), emoji_str.clone());
+    mappings.save()?;
+
+    // Print confirmation with the emoji
+    try_print(&format!("{} ➡ {} ✅", search_term, emoji_str));
+    Ok(())
+}
+
+fn handle_erase(search_term: &str) -> std::io::Result<()> {
+    if search_term.is_empty() {
+        eprintln!("Error: Cannot erase mapping for empty search term");
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "Cannot erase mapping for empty search term",
+        ));
+    }
+
+    let mut mappings = EmojiMappings::load();
+    if mappings.mappings.remove(search_term).is_none() {
+        try_print(&format!("No mapping found for '{}'", search_term));
+        return Ok(());
+    }
+
+    mappings.save()?;
+    try_print(&format!("Mapping for '{}' erased ✅", search_term));
     Ok(())
 }
 
@@ -202,31 +296,7 @@ fn handle_custom_mapping(mappings: &EmojiMappings, search_term: &str) -> Option<
     mappings.mappings.get(search_term).cloned()
 }
 
-// Function to handle the search mode
-fn handle_search(
-    emojis: &[EmojiRecord],
-    search_term: &str,
-    num_results: usize,
-    show_number: bool,
-) -> std::io::Result<()> {
-    search_emojis(emojis, search_term, num_results, show_number);
-    Ok(())
-}
-
-fn main() {
-    if let Err(e) = try_main() {
-        if let Some(errno) = e.raw_os_error() {
-            if errno == 32 {
-                // EPIPE
-                std::process::exit(0);
-            }
-        }
-        eprintln!("Error: {}", e);
-        std::process::exit(1);
-    }
-}
-
-fn try_main() -> std::io::Result<()> {
+fn main() -> std::io::Result<()> {
     let cmd = Cli::parse();
     if cmd.search_terms.is_empty() {
         eprintln!("Error: Please provide a search term");
@@ -238,50 +308,32 @@ fn try_main() -> std::io::Result<()> {
     let define = cmd.define;
     let show_number = cmd.number;
 
-    let mut mappings = EmojiMappings::load();
-
-    // Load emojis
-    let emojis: Vec<EmojiRecord> = serde_json::from_str(include_str!("../emojis.json")).unwrap();
-    let emojis: Vec<EmojiRecord> = emojis
-        .into_iter()
-        .filter(|e| !e.unicode.contains(' '))
-        .collect();
-
-    // Handle saving a mapping
-    if let Some(save_value) = &cmd.save {
-        // Check if save_value is a number (index)
-        if save_value.chars().all(|c| c.is_digit(10)) {
-            let index = save_value.parse::<usize>().unwrap();
-
-            // Find the emoji at that index
-            let results = find_emojis(&emojis, search_term, index.max(num_results));
-            let (emoji_char, _) = results[index - 1]; // Convert to 0-based index
-            let emoji_str = emoji_char.to_string();
-            mappings
-                .mappings
-                .insert(search_term.to_string(), emoji_str.clone());
-            mappings.save()?;
-            try_print(&format!("{} ➡ {} ✅", search_term, emoji_str));
-        } else {
-            // It's an emoji, save directly
-            mappings
-                .mappings
-                .insert(search_term.to_string(), save_value.to_string());
-            mappings.save()?;
-            try_print(&format!("{} ➡ {} ✅", search_term, save_value));
-        }
-        return Ok(());
+    // Handle erasing a mapping first
+    if cmd.erase {
+        return handle_erase(search_term);
     }
 
-    // Check for custom mapping first
+    // Handle saving a mapping
+    if let Some(emoji_to_save) = &cmd.save {
+        // The command format is: emo -s EMOJI SEARCH_TERM
+        // So emoji_to_save is the emoji and search_term is what we want to map it to
+        return handle_save(emoji_to_save, search_term);
+    }
+
+    let mappings = EmojiMappings::load();
+
+    // Check for custom mapping
     if let Some(emoji) = handle_custom_mapping(&mappings, search_term) {
         try_print(&emoji);
         return Ok(());
     }
 
+    // Handle define mode
     if define {
-        return handle_define(&emojis, search_term);
+        return handle_define(search_term);
     }
 
-    handle_search(&emojis, search_term, num_results, show_number)
+    // Handle search mode
+    handle_search(search_term, num_results, show_number);
+    Ok(())
 }
