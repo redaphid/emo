@@ -52,7 +52,6 @@ struct Cli {
     count: usize,
     #[arg(short, long, default_value_t = false, help = "show emoji names")]
     name: bool,
-    search_term: String,
     #[arg(
         short,
         long,
@@ -66,6 +65,8 @@ struct Cli {
         help = "save a mapping for the search term to a specific emoji"
     )]
     record: Option<String>,
+    #[arg(trailing_var_arg = true)]
+    search_terms: Vec<String>,
 }
 
 // Helper function to check if it's an exact word match
@@ -96,35 +97,42 @@ fn find_emojis<'a>(
     search_term: &str,
     num_results: usize,
 ) -> Vec<(char, &'a EmojiRecord)> {
-    let search_lower = search_term.to_lowercase();
+    let search_words: Vec<String> = search_term
+        .split_whitespace()
+        .map(|s| s.to_lowercase())
+        .collect();
     let mut results = Vec::new();
     let mut seen = HashSet::new();
 
+    // Helper to check if all search words match a predicate
+    let all_words_match = |text: &str, exact: bool| {
+        let text = text.to_lowercase();
+        search_words.iter().all(|word| {
+            if exact {
+                is_exact_word_match(&text, word)
+            } else {
+                text.contains(word)
+            }
+        })
+    };
+
     // List of search predicates in priority order
     let predicates: Vec<Box<dyn Fn(&EmojiRecord) -> bool>> = vec![
-        Box::new(|e| e.name.to_lowercase() == search_lower),
-        Box::new(|e| e.keywords.iter().any(|k| k.to_lowercase() == search_lower)),
-        Box::new(|e| is_exact_word_match(&e.name, &search_lower)),
-        Box::new(|e| {
-            e.keywords
-                .iter()
-                .any(|k| is_exact_word_match(k, &search_lower))
-        }),
-        Box::new(|e| e.name.to_lowercase().contains(&search_lower)),
-        Box::new(|e| {
-            e.keywords
-                .iter()
-                .any(|k| k.to_lowercase().contains(&search_lower))
-        }),
+        // Priority 1: Exact name match (all words in order)
+        Box::new(|e| e.name.to_lowercase() == search_term.to_lowercase()),
+        // Priority 2: All words match name exactly
+        Box::new(|e| all_words_match(&e.name, true)),
+        // Priority 3: All words match keywords exactly
+        Box::new(|e| e.keywords.iter().any(|k| all_words_match(k, true))),
+        // Priority 4: All words contained in name
+        Box::new(|e| all_words_match(&e.name, false)),
+        // Priority 5: All words contained in keywords
+        Box::new(|e| e.keywords.iter().any(|k| all_words_match(k, false))),
+        // Priority 6: All words contained in definition
         Box::new(|e| {
             e.definition
                 .as_ref()
-                .map_or(false, |d| is_exact_word_match(d, &search_lower))
-        }),
-        Box::new(|e| {
-            e.definition
-                .as_ref()
-                .map_or(false, |d| d.to_lowercase().contains(&search_lower))
+                .map_or(false, |d| all_words_match(d, false))
         }),
     ];
 
@@ -176,7 +184,11 @@ fn main() {
 
 fn try_main() -> std::io::Result<()> {
     let cmd = Cli::parse();
-    let search_term = &cmd.search_term;
+    if cmd.search_terms.is_empty() {
+        eprintln!("Error: Please provide a search term");
+        std::process::exit(1);
+    }
+    let search_term = &cmd.search_terms.join(" ");
     let show_name = cmd.name;
     let num_results = cmd.count;
     let define = cmd.define;
