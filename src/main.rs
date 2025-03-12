@@ -50,8 +50,6 @@ fn try_print(s: &str) {
 struct Cli {
     #[arg(short, long, default_value_t = 1, help = "number of results to show")]
     count: usize,
-    #[arg(short, long, default_value_t = false, help = "show emoji names")]
-    name: bool,
     #[arg(
         short,
         long,
@@ -64,7 +62,9 @@ struct Cli {
         long,
         help = "save a mapping for the search term to a specific emoji"
     )]
-    record: Option<String>,
+    save: Option<String>,
+    #[arg(short = 'n', long, help = "display the number of a given emoji result")]
+    number: bool,
     #[arg(trailing_var_arg = true)]
     search_terms: Vec<String>,
 }
@@ -154,19 +154,25 @@ fn find_emojis<'a>(
     results
 }
 
-fn print_emojis(results: &[(char, &EmojiRecord)], show_name: bool) {
-    for (emoji_char, emoji) in results {
-        if show_name {
-            try_print(&format!("{} - {}", emoji_char, emoji.name));
+fn print_emojis(results: &[(char, &EmojiRecord)], show_number: bool) {
+    for (i, (emoji_char, emoji)) in results.iter().enumerate() {
+        let description = emoji.definition.as_deref().unwrap_or("");
+        let prefix = if show_number {
+            format!("{}. ", i + 1)
         } else {
-            try_print(&format!("{}", emoji_char));
-        }
+            String::new()
+        };
+
+        try_print(&format!(
+            "{}{} - {}. {}",
+            prefix, emoji_char, emoji.name, description
+        ));
     }
 }
 
-fn search_emojis(emojis: &[EmojiRecord], search_term: &str, num_results: usize, show_name: bool) {
+fn search_emojis(emojis: &[EmojiRecord], search_term: &str, num_results: usize, show_number: bool) {
     let results = find_emojis(emojis, search_term, num_results);
-    print_emojis(&results, show_name);
+    print_emojis(&results, show_number);
 }
 
 fn main() {
@@ -189,14 +195,14 @@ fn try_main() -> std::io::Result<()> {
         std::process::exit(1);
     }
     let search_term = &cmd.search_terms.join(" ");
-    let show_name = cmd.name;
     let num_results = cmd.count;
     let define = cmd.define;
+    let show_number = cmd.number;
 
     let mut mappings = EmojiMappings::load();
 
     // Handle recording a new mapping
-    if let Some(emoji) = cmd.record {
+    if let Some(emoji) = cmd.save {
         let emoji_clone = emoji.clone();
         mappings.mappings.insert(search_term.clone(), emoji);
         mappings.save()?;
@@ -234,6 +240,6 @@ fn try_main() -> std::io::Result<()> {
         return Ok(());
     }
 
-    search_emojis(&emojis, search_term, num_results, show_name);
+    search_emojis(&emojis, search_term, num_results, show_number);
     Ok(())
 }
