@@ -45,36 +45,6 @@ fn try_print(s: &str) {
     let _ = writeln!(std::io::stdout(), "{}", s);
 }
 
-fn print_emoji(
-    emoji: &EmojiRecord,
-    printed_emojis: &mut HashSet<char>,
-    count: &mut usize,
-    show_name: bool,
-) {
-    let emoji_char = char::from_u32(
-        u32::from_str_radix(
-            emoji
-                .unicode
-                .split_whitespace()
-                .next()
-                .unwrap()
-                .trim_start_matches("U+"),
-            16,
-        )
-        .unwrap(),
-    )
-    .unwrap();
-
-    if printed_emojis.insert(emoji_char) {
-        if show_name {
-            try_print(&format!("{} - {}", emoji_char, emoji.name));
-        } else {
-            try_print(&format!("{}", emoji_char));
-        }
-        *count += 1;
-    }
-}
-
 #[derive(Parser)]
 #[command(version = None)]
 struct Cli {
@@ -106,75 +76,78 @@ fn is_exact_word_match(text: &str, search: &str) -> bool {
 
 fn search_emojis(emojis: &[EmojiRecord], search_term: &str, num_results: usize, show_name: bool) {
     let search_lower = search_term.to_lowercase();
-    let mut printed_emojis = HashSet::new();
-    let mut count = 0;
+    let mut results = Vec::new();
+    let mut seen = HashSet::new();
 
-    // Chain all search priorities together
-    for emoji in emojis
-        .iter()
-        // Priority 1: Exact name match
-        .filter(|emoji| emoji.name.to_lowercase() == search_lower)
-        .chain(
-            // Priority 2: Exact keyword match
-            emojis.iter().filter(|emoji| {
+    // Helper to convert emoji to char
+    let to_char = |emoji: &EmojiRecord| {
+        char::from_u32(
+            u32::from_str_radix(
                 emoji
-                    .keywords
-                    .iter()
-                    .any(|k| k.to_lowercase() == search_lower)
-            }),
+                    .unicode
+                    .split_whitespace()
+                    .next()
+                    .unwrap()
+                    .trim_start_matches("U+"),
+                16,
+            )
+            .unwrap(),
         )
-        .chain(
-            // Priority 3: Exact word match in name
-            emojis
+        .unwrap()
+    };
+
+    // List of search predicates in priority order
+    let predicates: Vec<Box<dyn Fn(&EmojiRecord) -> bool>> = vec![
+        Box::new(|e| e.name.to_lowercase() == search_lower),
+        Box::new(|e| e.keywords.iter().any(|k| k.to_lowercase() == search_lower)),
+        Box::new(|e| is_exact_word_match(&e.name, &search_lower)),
+        Box::new(|e| {
+            e.keywords
                 .iter()
-                .filter(|emoji| is_exact_word_match(&emoji.name, &search_lower)),
-        )
-        .chain(
-            // Priority 4: Exact word match in keywords
-            emojis.iter().filter(|emoji| {
-                emoji
-                    .keywords
-                    .iter()
-                    .any(|k| is_exact_word_match(k, &search_lower))
-            }),
-        )
-        .chain(
-            // Priority 5: Partial match in name
-            emojis
+                .any(|k| is_exact_word_match(k, &search_lower))
+        }),
+        Box::new(|e| e.name.to_lowercase().contains(&search_lower)),
+        Box::new(|e| {
+            e.keywords
                 .iter()
-                .filter(|emoji| emoji.name.to_lowercase().contains(&search_lower)),
-        )
-        .chain(
-            // Priority 6: Partial match in keywords
-            emojis.iter().filter(|emoji| {
-                emoji
-                    .keywords
-                    .iter()
-                    .any(|k| k.to_lowercase().contains(&search_lower))
-            }),
-        )
-        .chain(
-            // Priority 7: Definition matches
-            emojis.iter().filter(|emoji| {
-                emoji
-                    .definition
-                    .as_ref()
-                    .map_or(false, |def| is_exact_word_match(def, &search_lower))
-            }),
-        )
-        .chain(
-            // Priority 8: Partial definition matches
-            emojis.iter().filter(|emoji| {
-                emoji
-                    .definition
-                    .as_ref()
-                    .map_or(false, |def| def.to_lowercase().contains(&search_lower))
-            }),
-        )
-    {
-        print_emoji(emoji, &mut printed_emojis, &mut count, show_name);
-        if count >= num_results {
+                .any(|k| k.to_lowercase().contains(&search_lower))
+        }),
+        Box::new(|e| {
+            e.definition
+                .as_ref()
+                .map_or(false, |d| is_exact_word_match(d, &search_lower))
+        }),
+        Box::new(|e| {
+            e.definition
+                .as_ref()
+                .map_or(false, |d| d.to_lowercase().contains(&search_lower))
+        }),
+    ];
+
+    // Try each predicate in order until we have enough results
+    for predicate in predicates {
+        if results.len() >= num_results {
             break;
+        }
+        for emoji in emojis {
+            if predicate(emoji) {
+                let c = to_char(emoji);
+                if seen.insert(c) {
+                    results.push((c, emoji));
+                    if results.len() >= num_results {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Print all results
+    for (emoji_char, emoji) in results {
+        if show_name {
+            try_print(&format!("{} - {}", emoji_char, emoji.name));
+        } else {
+            try_print(&format!("{}", emoji_char));
         }
     }
 }
