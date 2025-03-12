@@ -74,27 +74,31 @@ fn is_exact_word_match(text: &str, search: &str) -> bool {
         .any(|word| word.to_lowercase() == search)
 }
 
-fn search_emojis(emojis: &[EmojiRecord], search_term: &str, num_results: usize, show_name: bool) {
+// Helper to convert emoji to char
+fn to_char(emoji: &EmojiRecord) -> char {
+    char::from_u32(
+        u32::from_str_radix(
+            emoji
+                .unicode
+                .split_whitespace()
+                .next()
+                .unwrap()
+                .trim_start_matches("U+"),
+            16,
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+fn find_emojis<'a>(
+    emojis: &'a [EmojiRecord],
+    search_term: &str,
+    num_results: usize,
+) -> Vec<(char, &'a EmojiRecord)> {
     let search_lower = search_term.to_lowercase();
     let mut results = Vec::new();
     let mut seen = HashSet::new();
-
-    // Helper to convert emoji to char
-    let to_char = |emoji: &EmojiRecord| {
-        char::from_u32(
-            u32::from_str_radix(
-                emoji
-                    .unicode
-                    .split_whitespace()
-                    .next()
-                    .unwrap()
-                    .trim_start_matches("U+"),
-                16,
-            )
-            .unwrap(),
-        )
-        .unwrap()
-    };
 
     // List of search predicates in priority order
     let predicates: Vec<Box<dyn Fn(&EmojiRecord) -> bool>> = vec![
@@ -126,23 +130,23 @@ fn search_emojis(emojis: &[EmojiRecord], search_term: &str, num_results: usize, 
 
     // Try each predicate in order until we have enough results
     for predicate in predicates {
-        if results.len() >= num_results {
-            break;
-        }
         for emoji in emojis {
             if predicate(emoji) {
                 let c = to_char(emoji);
                 if seen.insert(c) {
                     results.push((c, emoji));
                     if results.len() >= num_results {
-                        break;
+                        return results;
                     }
                 }
             }
         }
     }
 
-    // Print all results
+    results
+}
+
+fn print_emojis(results: &[(char, &EmojiRecord)], show_name: bool) {
     for (emoji_char, emoji) in results {
         if show_name {
             try_print(&format!("{} - {}", emoji_char, emoji.name));
@@ -150,6 +154,11 @@ fn search_emojis(emojis: &[EmojiRecord], search_term: &str, num_results: usize, 
             try_print(&format!("{}", emoji_char));
         }
     }
+}
+
+fn search_emojis(emojis: &[EmojiRecord], search_term: &str, num_results: usize, show_name: bool) {
+    let results = find_emojis(emojis, search_term, num_results);
+    print_emojis(&results, show_name);
 }
 
 fn main() {
@@ -179,10 +188,7 @@ fn try_main() -> std::io::Result<()> {
         let emoji_clone = emoji.clone();
         mappings.mappings.insert(search_term.clone(), emoji);
         mappings.save()?;
-        try_print(&format!(
-            "Recorded mapping '{}' -> '{}'",
-            search_term, emoji_clone
-        ));
+        try_print(&format!("{} ➡ {} ✅", search_term, emoji_clone));
         return Ok(());
     }
 
