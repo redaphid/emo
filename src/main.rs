@@ -14,7 +14,7 @@ struct EmojiRecord {
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 struct EmojiMappings {
-    mappings: std::collections::HashMap<String, String>,
+    mappings: std::collections::HashMap<String, char>,
 }
 
 fn load_emojis() -> Vec<EmojiRecord> {
@@ -182,9 +182,30 @@ fn print(results: &[(char, &EmojiRecord)], show_number: bool) {
     }
 }
 
+fn get_custom_emoji(search_term: &str) -> Option<char> {
+    let mappings = EmojiMappings::load();
+    return mappings.mappings.get(search_term).cloned();
+}
+
 fn handle_search(search_term: &str, num_results: usize, show_number: bool) {
     let emojis = load_emojis();
-    let results = search(&emojis, search_term, num_results);
+    let mappings = EmojiMappings::load();
+
+    // Get search results
+    let mut results = Vec::new();
+
+    if let Some(custom_emoji) = get_custom_emoji(search_term) {
+        results.push(custom_emoji);
+    }
+
+    if results.len() >= num_results {
+        return;
+    }
+
+    let regular_results = search(&emojis, search_term, num_results - results.len());
+    results.extend(regular_results);
+
+    // Use the existing print function to display results
     print(&results, show_number);
 }
 
@@ -243,31 +264,29 @@ fn handle_save(emoji_to_save: &str, search_term: &str) -> std::io::Result<()> {
         let results = search(&emojis, search_term, index.max(1));
 
         let (emoji_char, _) = results[index - 1];
-        let emoji_str = emoji_char.to_string();
 
         // Clone emoji_str before inserting
         mappings
             .mappings
-            .insert(search_term.to_string(), emoji_str.clone());
+            .insert(search_term.to_string(), emoji_char);
         mappings.save()?;
 
         // Print confirmation with the emoji
-        try_print(&format!("{} ➡ {} ✅", search_term, emoji_str));
+        try_print(&format!("{} ➡ {} ✅", search_term, emoji_char));
         return Ok(());
     }
 
     // Extract just the first character as the emoji
     let emoji_char = emoji_to_save.chars().next().unwrap_or('?');
-    let emoji_str = emoji_char.to_string();
 
     // Clone emoji_str before inserting
     mappings
         .mappings
-        .insert(search_term.to_string(), emoji_str.clone());
+        .insert(search_term.to_string(), emoji_char);
     mappings.save()?;
 
     // Print confirmation with the emoji
-    try_print(&format!("{} ➡ {} ✅", search_term, emoji_str));
+    try_print(&format!("{} ➡ {} ✅", search_term, emoji_char));
     Ok(())
 }
 
@@ -289,11 +308,6 @@ fn handle_erase(search_term: &str) -> std::io::Result<()> {
     mappings.save()?;
     try_print(&format!("Mapping for '{}' erased ✅", search_term));
     Ok(())
-}
-
-// Function to handle custom mapping lookup
-fn handle_custom_mapping(mappings: &EmojiMappings, search_term: &str) -> Option<String> {
-    mappings.mappings.get(search_term).cloned()
 }
 
 fn main() -> std::io::Result<()> {
@@ -320,20 +334,12 @@ fn main() -> std::io::Result<()> {
         return handle_save(emoji_to_save, search_term);
     }
 
-    let mappings = EmojiMappings::load();
-
-    // Check for custom mapping
-    if let Some(emoji) = handle_custom_mapping(&mappings, search_term) {
-        try_print(&emoji);
-        return Ok(());
-    }
-
     // Handle define mode
     if define {
         return handle_define(search_term);
     }
 
-    // Handle search mode
+    // Handle search mode (which now handles custom mappings internally)
     handle_search(search_term, num_results, show_number);
     Ok(())
 }
