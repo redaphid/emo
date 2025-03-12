@@ -244,18 +244,37 @@ fn try_main() -> std::io::Result<()> {
     }
 
     if define {
-        for emoji in &emojis {
-            let emoji_char = char::from_u32(
-                u32::from_str_radix(emoji.unicode.trim_start_matches("U+"), 16).unwrap(),
-            )
-            .unwrap();
-            if emoji_char == search_term.chars().next().unwrap() {
+        // Try to find the emoji directly first
+        let mut found = false;
+
+        // Only try direct lookup if the search term could be an emoji (at least one character)
+        if !search_term.is_empty() {
+            let first_char = search_term.chars().next().unwrap();
+
+            for emoji in &emojis {
+                let emoji_char = to_char(emoji);
+                if emoji_char == first_char {
+                    let name = &emoji.name;
+                    let description = emoji.definition.as_deref().unwrap_or("");
+                    try_print(&format!("{} - {} {}", emoji_char, name, description));
+                    found = true;
+                    break;
+                }
+            }
+        }
+
+        // If exact emoji not found, fall back to search
+        if !found {
+            // Search for the emoji and define the first result
+            let results = find_emojis(&emojis, search_term, 1);
+            if !results.is_empty() {
+                let (emoji_char, emoji) = &results[0];
                 let name = &emoji.name;
                 let description = emoji.definition.as_deref().unwrap_or("");
                 try_print(&format!("{} - {} {}", emoji_char, name, description));
-                return Ok(());
             }
         }
+
         return Ok(());
     }
 
