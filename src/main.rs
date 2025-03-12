@@ -155,18 +155,14 @@ fn find_emojis<'a>(
 }
 
 fn print_emojis(results: &[(char, &EmojiRecord)], show_number: bool) {
-    for (i, (emoji_char, emoji)) in results.iter().enumerate() {
-        let description = emoji.definition.as_deref().unwrap_or("");
+    for (i, (emoji_char, _)) in results.iter().enumerate() {
         let prefix = if show_number {
             format!("{}. ", i + 1)
         } else {
             String::new()
         };
 
-        try_print(&format!(
-            "{}{} - {}. {}",
-            prefix, emoji_char, emoji.name, description
-        ));
+        try_print(&format!("{}{}", prefix, emoji_char));
     }
 }
 
@@ -201,12 +197,43 @@ fn try_main() -> std::io::Result<()> {
 
     let mut mappings = EmojiMappings::load();
 
+    // Load emojis
+    let emojis: Vec<EmojiRecord> = serde_json::from_str(include_str!("../emojis.json")).unwrap();
+    let emojis: Vec<EmojiRecord> = emojis
+        .into_iter()
+        .filter(|e| !e.unicode.contains(' '))
+        .collect();
+
     // Handle recording a new mapping
-    if let Some(emoji) = cmd.save {
-        let emoji_clone = emoji.clone();
-        mappings.mappings.insert(search_term.clone(), emoji);
-        mappings.save()?;
-        try_print(&format!("{} ➡ {} ✅", search_term, emoji_clone));
+    if let Some(save_value) = cmd.save {
+        if let Ok(index) = save_value.parse::<usize>() {
+            // It's a number, so save the nth emoji from search results
+            let results = find_emojis(&emojis, search_term, num_results.max(index));
+
+            if index > 0 && index <= results.len() {
+                let (emoji_char, _) = results[index - 1]; // Convert to 0-based index
+                let emoji_str = emoji_char.to_string();
+                mappings
+                    .mappings
+                    .insert(search_term.clone(), emoji_str.clone());
+                mappings.save()?;
+                try_print(&format!("{} ➡ {} ✅", search_term, emoji_str));
+            } else {
+                eprintln!(
+                    "Error: Index {} is out of range (1-{})",
+                    index,
+                    results.len()
+                );
+                std::process::exit(1);
+            }
+        } else {
+            // It's an emoji, save directly
+            mappings
+                .mappings
+                .insert(search_term.clone(), save_value.clone());
+            mappings.save()?;
+            try_print(&format!("{} ➡ {} ✅", search_term, save_value));
+        }
         return Ok(());
     }
 
@@ -216,12 +243,6 @@ fn try_main() -> std::io::Result<()> {
         return Ok(());
     }
 
-    let emojis: Vec<EmojiRecord> = serde_json::from_str(include_str!("../emojis.json")).unwrap();
-    let emojis: Vec<EmojiRecord> = emojis
-        .into_iter()
-        .filter(|e| !e.unicode.contains(' '))
-        .collect();
-
     if define {
         for emoji in &emojis {
             let emoji_char = char::from_u32(
@@ -229,11 +250,9 @@ fn try_main() -> std::io::Result<()> {
             )
             .unwrap();
             if emoji_char == search_term.chars().next().unwrap() {
-                try_print(&format!(
-                    "{} - {}",
-                    emoji_char,
-                    emoji.definition.as_ref().unwrap()
-                ));
+                let name = &emoji.name;
+                let description = emoji.definition.as_deref().unwrap_or("");
+                try_print(&format!("{} - {} {}", emoji_char, name, description));
                 return Ok(());
             }
         }
