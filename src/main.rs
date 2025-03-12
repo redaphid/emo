@@ -57,6 +57,7 @@ struct Cli {
     )]
     define: bool,
 }
+
 fn main() {
     let cmd = Cli::parse();
     let search_term = &cmd.search_term;
@@ -71,6 +72,7 @@ fn main() {
         .into_iter()
         .filter(|e| !e.unicode.contains(' '))
         .collect();
+
     if define {
         // get search term as unicode code. iterate through the emojis, split the 'unicode' property and compare the first character with the search term
         // if it matches, print the emoji
@@ -91,11 +93,41 @@ fn main() {
         return;
     }
 
+    let search_lower = search_term.to_lowercase();
     let mut printed_emojis = HashSet::new();
 
+    // Helper function to check if it's an exact word match
+    fn is_exact_word_match(text: &str, search: &str) -> bool {
+        text.split(|c: char| !c.is_alphanumeric())
+            .any(|word| word.to_lowercase() == search)
+    }
+
+    // Priority 1: Exact name match
     for emoji in &emojis {
-        if emoji.name.contains(search_term)
-            || emoji.keywords.iter().any(|k| k.contains(search_term))
+        if emoji.name.to_lowercase() == search_lower {
+            print_emoji(emoji, &mut printed_emojis, &mut count, show_name);
+            if count >= num_results {
+                return;
+            }
+        }
+    }
+
+    // Priority 2: Exact word match in name
+    for emoji in &emojis {
+        if is_exact_word_match(&emoji.name, &search_lower) {
+            print_emoji(emoji, &mut printed_emojis, &mut count, show_name);
+            if count >= num_results {
+                return;
+            }
+        }
+    }
+
+    // Priority 3: Exact keyword match
+    for emoji in &emojis {
+        if emoji
+            .keywords
+            .iter()
+            .any(|k| k.to_lowercase() == search_lower)
         {
             print_emoji(emoji, &mut printed_emojis, &mut count, show_name);
             if count >= num_results {
@@ -104,15 +136,64 @@ fn main() {
         }
     }
 
+    // Priority 4: Exact word match in keywords
     for emoji in &emojis {
         if emoji
-            .definition
-            .as_deref()
-            .map_or(false, |d| d.contains(search_term))
+            .keywords
+            .iter()
+            .any(|k| is_exact_word_match(k, &search_lower))
         {
             print_emoji(emoji, &mut printed_emojis, &mut count, show_name);
             if count >= num_results {
                 return;
+            }
+        }
+    }
+
+    // Priority 5: Partial match in name
+    for emoji in &emojis {
+        if emoji.name.to_lowercase().contains(&search_lower) {
+            print_emoji(emoji, &mut printed_emojis, &mut count, show_name);
+            if count >= num_results {
+                return;
+            }
+        }
+    }
+
+    // Priority 6: Partial match in keywords
+    for emoji in &emojis {
+        if emoji
+            .keywords
+            .iter()
+            .any(|k| k.to_lowercase().contains(&search_lower))
+        {
+            print_emoji(emoji, &mut printed_emojis, &mut count, show_name);
+            if count >= num_results {
+                return;
+            }
+        }
+    }
+
+    // Priority 7: Definition matches
+    for emoji in &emojis {
+        if let Some(def) = &emoji.definition {
+            if is_exact_word_match(def, &search_lower) {
+                print_emoji(emoji, &mut printed_emojis, &mut count, show_name);
+                if count >= num_results {
+                    return;
+                }
+            }
+        }
+    }
+
+    // Priority 8: Partial definition matches
+    for emoji in &emojis {
+        if let Some(def) = &emoji.definition {
+            if def.to_lowercase().contains(&search_lower) {
+                print_emoji(emoji, &mut printed_emojis, &mut count, show_name);
+                if count >= num_results {
+                    return;
+                }
             }
         }
     }
