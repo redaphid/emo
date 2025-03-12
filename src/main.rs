@@ -60,7 +60,7 @@ struct Cli {
     #[arg(
         short = 's',
         long,
-        help = "save a mapping for the search term to a specific emoji"
+        help = "save a mapping for the search term to a specific emoji or index"
     )]
     save: Option<String>,
     #[arg(short = 'n', long, help = "display the number of a given emoji result")]
@@ -171,6 +171,48 @@ fn search_emojis(emojis: &[EmojiRecord], search_term: &str, num_results: usize, 
     print_emojis(&results, show_number);
 }
 
+// Function to handle the define mode
+fn handle_define(emojis: &[EmojiRecord], search_term: &str) -> std::io::Result<()> {
+    let first_char = search_term.chars().next().unwrap();
+
+    for emoji in emojis {
+        let emoji_char = to_char(emoji);
+        if emoji_char == first_char {
+            let name = &emoji.name;
+            let description = emoji.definition.as_deref().unwrap_or("");
+            try_print(&format!("{} - {} {}", emoji_char, name, description));
+            return Ok(());
+        }
+    }
+
+    // If exact emoji not found, fall back to search
+    let results = find_emojis(emojis, search_term, 1);
+    if !results.is_empty() {
+        let (emoji_char, emoji) = &results[0];
+        let name = &emoji.name;
+        let description = emoji.definition.as_deref().unwrap_or("");
+        try_print(&format!("{} - {} {}", emoji_char, name, description));
+    }
+
+    Ok(())
+}
+
+// Function to handle custom mapping lookup
+fn handle_custom_mapping(mappings: &EmojiMappings, search_term: &str) -> Option<String> {
+    mappings.mappings.get(search_term).cloned()
+}
+
+// Function to handle the search mode
+fn handle_search(
+    emojis: &[EmojiRecord],
+    search_term: &str,
+    num_results: usize,
+    show_number: bool,
+) -> std::io::Result<()> {
+    search_emojis(emojis, search_term, num_results, show_number);
+    Ok(())
+}
+
 fn main() {
     if let Err(e) = try_main() {
         if let Some(errno) = e.raw_os_error() {
@@ -190,6 +232,7 @@ fn try_main() -> std::io::Result<()> {
         eprintln!("Error: Please provide a search term");
         std::process::exit(1);
     }
+
     let search_term = &cmd.search_terms.join(" ");
     let num_results = cmd.count;
     let define = cmd.define;
@@ -204,33 +247,26 @@ fn try_main() -> std::io::Result<()> {
         .filter(|e| !e.unicode.contains(' '))
         .collect();
 
-    // Handle recording a new mapping
-    if let Some(save_value) = cmd.save {
-        if let Ok(index) = save_value.parse::<usize>() {
-            // It's a number, so save the nth emoji from search results
-            let results = find_emojis(&emojis, search_term, num_results.max(index));
+    // Handle saving a mapping
+    if let Some(save_value) = &cmd.save {
+        // Check if save_value is a number (index)
+        if save_value.chars().all(|c| c.is_digit(10)) {
+            let index = save_value.parse::<usize>().unwrap();
 
-            if index > 0 && index <= results.len() {
-                let (emoji_char, _) = results[index - 1]; // Convert to 0-based index
-                let emoji_str = emoji_char.to_string();
-                mappings
-                    .mappings
-                    .insert(search_term.clone(), emoji_str.clone());
-                mappings.save()?;
-                try_print(&format!("{} ➡ {} ✅", search_term, emoji_str));
-            } else {
-                eprintln!(
-                    "Error: Index {} is out of range (1-{})",
-                    index,
-                    results.len()
-                );
-                std::process::exit(1);
-            }
+            // Find the emoji at that index
+            let results = find_emojis(&emojis, search_term, index.max(num_results));
+            let (emoji_char, _) = results[index - 1]; // Convert to 0-based index
+            let emoji_str = emoji_char.to_string();
+            mappings
+                .mappings
+                .insert(search_term.to_string(), emoji_str.clone());
+            mappings.save()?;
+            try_print(&format!("{} ➡ {} ✅", search_term, emoji_str));
         } else {
             // It's an emoji, save directly
             mappings
                 .mappings
-                .insert(search_term.clone(), save_value.clone());
+                .insert(search_term.to_string(), save_value.to_string());
             mappings.save()?;
             try_print(&format!("{} ➡ {} ✅", search_term, save_value));
         }
@@ -238,46 +274,14 @@ fn try_main() -> std::io::Result<()> {
     }
 
     // Check for custom mapping first
-    if let Some(emoji) = mappings.mappings.get(search_term) {
-        try_print(emoji);
+    if let Some(emoji) = handle_custom_mapping(&mappings, search_term) {
+        try_print(&emoji);
         return Ok(());
     }
 
     if define {
-        // Try to find the emoji directly first
-        let mut found = false;
-
-        // Only try direct lookup if the search term could be an emoji (at least one character)
-        if !search_term.is_empty() {
-            let first_char = search_term.chars().next().unwrap();
-
-            for emoji in &emojis {
-                let emoji_char = to_char(emoji);
-                if emoji_char == first_char {
-                    let name = &emoji.name;
-                    let description = emoji.definition.as_deref().unwrap_or("");
-                    try_print(&format!("{} - {} {}", emoji_char, name, description));
-                    found = true;
-                    break;
-                }
-            }
-        }
-
-        // If exact emoji not found, fall back to search
-        if !found {
-            // Search for the emoji and define the first result
-            let results = find_emojis(&emojis, search_term, 1);
-            if !results.is_empty() {
-                let (emoji_char, emoji) = &results[0];
-                let name = &emoji.name;
-                let description = emoji.definition.as_deref().unwrap_or("");
-                try_print(&format!("{} - {} {}", emoji_char, name, description));
-            }
-        }
-
-        return Ok(());
+        return handle_define(&emojis, search_term);
     }
 
-    search_emojis(&emojis, search_term, num_results, show_number);
-    Ok(())
+    handle_search(&emojis, search_term, num_results, show_number)
 }
