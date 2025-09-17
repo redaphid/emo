@@ -3,6 +3,14 @@ name = "emo"
 version = "1.0.0"
 edition = "2021"
 
+[lib]
+name = "emo"
+path = "src/lib.rs"
+
+[[bin]]
+name = "emo"
+path = "src/main.rs"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
 clap = { version = "4.0", features = ["derive", "cargo"] }
