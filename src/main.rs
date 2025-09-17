@@ -1,5 +1,6 @@
 use clap::Parser;
 use emo::{
+    ai::AiEmojiSelector,
     error::{EmoError, Result},
     load_emojis, search, to_char, EmojiMappings, EmojiRecord,
 };
@@ -40,6 +41,10 @@ struct Cli {
     list_mappings: bool,
     #[arg(short = 'r', long, help = "get a random emoji")]
     random: bool,
+    #[arg(long, help = "use AI to select the best emoji for your situation")]
+    ai: bool,
+    #[arg(long, help = "specify the AI model to use (default: gemma2:2b)")]
+    model: Option<String>,
     #[arg(trailing_var_arg = true)]
     search_terms: Vec<String>,
 }
@@ -260,6 +265,19 @@ fn handle_random() -> Result<()> {
     Ok(())
 }
 
+fn handle_ai_emoji(situation: &str, model: Option<String>) -> Result<()> {
+    let ai_selector = if let Some(model_name) = model {
+        AiEmojiSelector::with_model(model_name)
+    } else {
+        AiEmojiSelector::new()
+    };
+
+    // Use the LLM for emoji selection - NO FALLBACKS, fail loudly
+    let emoji = ai_selector.select_emoji_llm(situation)?;
+    try_print(&emoji);
+    Ok(())
+}
+
 fn run() -> Result<()> {
     let cmd = Cli::parse();
 
@@ -275,7 +293,7 @@ fn run() -> Result<()> {
 
     if cmd.search_terms.is_empty() {
         return Err(EmoError::InvalidInput(
-            "Please provide a search term".to_string(),
+            "Please provide a search term or situation".to_string(),
         ));
     }
 
@@ -283,6 +301,11 @@ fn run() -> Result<()> {
     let num_results = cmd.count;
     let define = cmd.define;
     let show_number = cmd.number;
+
+    // Handle AI mode
+    if cmd.ai {
+        return handle_ai_emoji(search_term, cmd.model);
+    }
 
     // Handle erasing a mapping first
     if cmd.erase {

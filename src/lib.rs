@@ -1,3 +1,4 @@
+pub mod ai;
 pub mod error;
 
 use error::{EmoError, Result};
