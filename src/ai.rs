@@ -190,8 +190,9 @@ impl AiEmojiSelector {
             .map_err(|e| EmoError::ConfigError(format!("Failed to decode: {}", e)))?;
 
         // Generate tokens looking for an emoji
+        // Use higher temperature for more varied/creative output
         let mut sampler = LlamaSampler::chain_simple([
-            LlamaSampler::temp(0.2),
+            LlamaSampler::temp(0.8),
             LlamaSampler::dist(1234),
         ]);
 
@@ -250,16 +251,103 @@ impl AiEmojiSelector {
     }
 
     pub fn generate_emoji_sentence(&self, situation: &str, length: usize) -> Result<String> {
-        let mut emojis = Vec::new();
-        let mut exclude = Vec::new();
+        // Download model if needed
+        let model_path = self.download_model_sync()
+            .map_err(|e| EmoError::ConfigError(format!("Failed to download model: {}", e)))?;
 
-        for _ in 0..length {
-            let emoji = self.select_emoji_with_exclusions(situation, &exclude)?;
-            emojis.push(emoji.clone());
-            exclude.push(emoji);
+        // Load model
+        let model_params = LlamaModelParams::default();
+        let model = LlamaModel::load_from_file(&self.backend, model_path, &model_params)
+            .map_err(|e| EmoError::ConfigError(format!("Failed to load model: {}", e)))?;
+
+        // Create context
+        let ctx_params = LlamaContextParams::default()
+            .with_n_ctx(Some(NonZeroU32::new(2048).unwrap()));
+        let mut ctx = model.new_context(&self.backend, ctx_params)
+            .map_err(|e| EmoError::ConfigError(format!("Failed to create context: {}", e)))?;
+
+        // Create prompt for emoji sentence generation
+        let prompt = format!(
+            "Task: Create a sequence of exactly {} emojis that tells a story about: {}. \
+             Use only emojis, no text. Reply with the emoji sequence.\n\
+             Emoji sequence:",
+            length, situation
+        );
+
+        // Tokenize prompt
+        let tokens_list = model.str_to_token(&prompt, AddBos::Always)
+            .map_err(|e| EmoError::ConfigError(format!("Failed to tokenize: {}", e)))?;
+
+        // Process prompt
+        let mut batch = LlamaBatch::new(512, 1);
+        let last_index = tokens_list.len() - 1;
+        for (i, token) in tokens_list.iter().enumerate() {
+            batch.add(*token, i as i32, &[0], i == last_index)
+                .map_err(|e| EmoError::ConfigError(format!("Failed to add to batch: {}", e)))?;
+        }
+        ctx.decode(&mut batch)
+            .map_err(|e| EmoError::ConfigError(format!("Failed to decode: {}", e)))?;
+
+        // Use truly random seed
+        use std::collections::hash_map::RandomState;
+        use std::hash::{BuildHasher, Hash, Hasher};
+        let mut hasher = RandomState::new().build_hasher();
+        std::time::SystemTime::now().hash(&mut hasher);
+        let seed = hasher.finish() as u32;
+
+        let mut sampler = LlamaSampler::chain_simple([
+            LlamaSampler::temp(0.2),  // Very low temperature for focused output
+            LlamaSampler::dist(seed),
+        ]);
+
+        let mut decoder = encoding_rs::UTF_8.new_decoder();
+        let mut output = String::new();
+        let mut emoji_count = 0;
+        let mut n_cur = batch.n_tokens();
+
+        // Generate until we have enough emojis
+        for _ in 0..100 {  // More tokens for full sentence
+            let new_token_id = sampler.sample(&ctx, batch.n_tokens() - 1);
+            sampler.accept(new_token_id);
+
+            if model.is_eog_token(new_token_id) {
+                break;
+            }
+
+            let token_bytes = model.token_to_bytes(new_token_id, Special::Tokenize)
+                .map_err(|e| EmoError::ConfigError(format!("Failed to get token bytes: {}", e)))?;
+
+            let mut token_str = String::with_capacity(32);
+            let (_result, _read, _had_errors) = decoder.decode_to_string(&token_bytes, &mut token_str, false);
+
+            // Count emojis in this token
+            for ch in token_str.chars() {
+                if is_emoji_char(ch) {
+                    emoji_count += 1;
+                    output.push(ch);
+                    if emoji_count >= length {
+                        return Ok(output);
+                    }
+                }
+            }
+
+            // Continue generation
+            batch.clear();
+            batch.add(new_token_id, n_cur, &[0], true)
+                .map_err(|e| EmoError::ConfigError(format!("Failed to add to batch: {}", e)))?;
+            n_cur += 1;
+            ctx.decode(&mut batch)
+                .map_err(|e| EmoError::ConfigError(format!("Failed to decode: {}", e)))?;
         }
 
-        Ok(emojis.join(""))
+        // Return what we got even if not exactly the right length
+        if !output.is_empty() {
+            Ok(output)
+        } else {
+            Err(EmoError::ConfigError(
+                "Failed to generate emoji sentence".to_string()
+            ))
+        }
     }
 }
 
