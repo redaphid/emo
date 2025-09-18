@@ -11,7 +11,7 @@ fn try_print(s: &str) {
 }
 
 #[derive(Parser)]
-#[command(version = None)]
+#[command(author = "redaphid", about = "CLI for finding emojis", version)]
 struct Cli {
     #[arg(short, long, default_value_t = 1, help = "number of results to show")]
     count: usize,
