@@ -1,6 +1,7 @@
 pub mod ai;
 pub mod error;
 pub mod generators;
+pub mod models;
 
 use error::{EmoError, Result};
 use serde::{Deserialize, Serialize};

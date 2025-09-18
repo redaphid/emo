@@ -97,20 +97,22 @@ fn test_memo_with_count_provides_variety() {
 #[test]
 fn test_ai_flag_ignores_memo() {
     // The --ai flag should ignore memos per precedence rules
-    // We can't test actual AI output without model, but we can verify the flag is recognized
+    // With a model configured, AI mode will work and produce an emoji (not the memo)
     let temp_dir = TempDir::new().unwrap();
     let config_dir = temp_dir.path().join("emo");
     fs::create_dir_all(&config_dir).unwrap();
 
     let config_path = config_dir.join("config.json");
-    fs::write(&config_path, r#"{"mappings":{"test":"🧪"},"model":null}"#).unwrap();
+    fs::write(&config_path, r#"{"mappings":{"test":"🧪"},"model":"llama-3.2-1b"}"#).unwrap();
 
     let mut cmd = Command::cargo_bin("emo").unwrap();
     cmd.env("XDG_CONFIG_HOME", temp_dir.path());
     cmd.args(&["--ai", "test"]);
 
-    // AI mode requires a model, so it should fail but recognize the flag
-    cmd.assert().failure();
+    // AI mode should succeed and NOT return the memo emoji 🧪
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("🧪").not());
 }
 
 #[test]

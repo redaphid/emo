@@ -2,7 +2,7 @@ use clap::Parser;
 use emo::{
     ai::AiEmojiSelector,
     error::{EmoError, Result},
-    load_emojis, search, to_char, EmojiMappings, EmojiRecord,
+    load_emojis, models::ModelRegistry, search, to_char, EmojiMappings, EmojiRecord,
 };
 use std::io::Write;
 
@@ -45,6 +45,8 @@ struct Cli {
     ai: bool,
     #[arg(long, help = "specify the AI model to use")]
     model: Option<String>,
+    #[arg(long, help = "list available AI models")]
+    list_models: bool,
     #[arg(short = 's', long = "sentence", help = "length of each emoji sentence (use with -c for multiple sentences)")]
     sentence: Option<usize>,
     #[arg(trailing_var_arg = true)]
@@ -243,6 +245,34 @@ fn main() {
     }
 }
 
+fn handle_list_models() -> Result<()> {
+    try_print("Available models:");
+    try_print("");
+
+    let registry = ModelRegistry::new();
+    let models = registry.fetch_from_api()?;
+
+    // Find the longest ID for alignment
+    let max_id_len = models.iter()
+        .map(|m| m.id.len())
+        .max()
+        .unwrap_or(10);
+
+    for model in models {
+        try_print(&format!("  {:width$}  {}  {}",
+            model.id,
+            model.name,
+            model.description,
+            width = max_id_len
+        ));
+    }
+
+    try_print("");
+    try_print("To use a model, set it in your config file or use --model <id>");
+
+    Ok(())
+}
+
 fn handle_list_mappings() -> Result<()> {
     let mappings = EmojiMappings::load()?;
     if mappings.mappings.is_empty() {
@@ -334,16 +364,19 @@ fn handle_ai_sentence(situation: &str, model: Option<String>, length: usize) -> 
 fn run() -> Result<()> {
     let cmd = Cli::parse();
 
-    // Handle list mappings
-    if cmd.list_mappings {
-        return handle_list_mappings();
+    // Early return for simple info commands
+    if cmd.list_models { return handle_list_models() }
+    if cmd.list_mappings { return handle_list_mappings() }
+    if cmd.random { return handle_random() }
+
+    // Save model to config once if specified
+    if let Some(ref model_name) = cmd.model {
+        let mut mappings = EmojiMappings::load()?;
+        mappings.model = Some(model_name.clone());
+        mappings.save()?;
     }
 
-    // Handle random emoji
-    if cmd.random {
-        return handle_random();
-    }
-
+    // Require search terms for all remaining operations
     if cmd.search_terms.is_empty() {
         return Err(EmoError::InvalidInput(
             "Please provide a search term or situation".to_string(),
@@ -351,46 +384,20 @@ fn run() -> Result<()> {
     }
 
     let search_term = &cmd.search_terms.join(" ");
-    let num_results = cmd.count;
-    let define = cmd.define;
-    let show_number = cmd.number;
 
-    // Handle AI mode
-    if cmd.ai {
-        // Handle sentence generation - if both -c and -s are specified, generate multiple sentences
-        if let Some(length) = cmd.sentence {
-            if cmd.count > 1 {
-                // Generate multiple sentences
-                for _ in 0..cmd.count {
-                    handle_ai_sentence(search_term, cmd.model.clone(), length)?;
-                }
-                return Ok(());
-            } else {
-                // Generate single sentence
-                return handle_ai_sentence(search_term, cmd.model, length);
+    match () {
+        _ if cmd.ai || cmd.model.is_some() => {
+            match cmd.sentence {
+                Some(len) => (0..cmd.count).try_for_each(|_|
+                    handle_ai_sentence(search_term, cmd.model.clone(), len))?,
+                None => handle_ai_emoji(search_term, cmd.model, cmd.count)?,
             }
         }
-        // Otherwise generate count emojis
-        return handle_ai_emoji(search_term, cmd.model, cmd.count);
+        _ if cmd.erase => handle_erase(search_term)?,
+        _ if cmd.save.is_some() => handle_save(cmd.save.as_ref().unwrap(), search_term)?,
+        _ if cmd.define => handle_define(search_term)?,
+        _ => handle_search(search_term, cmd.count, cmd.number)?,
     }
 
-    // Handle erasing a mapping first
-    if cmd.erase {
-        return handle_erase(search_term);
-    }
-
-    // Handle saving a mapping
-    if let Some(emoji_to_save) = &cmd.save {
-        // The command format is: emo -s EMOJI SEARCH_TERM
-        // So emoji_to_save is the emoji and search_term is what we want to map it to
-        return handle_save(emoji_to_save, search_term);
-    }
-
-    // Handle define mode
-    if define {
-        return handle_define(search_term);
-    }
-
-    // Handle search mode (which now handles custom mappings internally)
-    handle_search(search_term, num_results, show_number)
+    Ok(())
 }
