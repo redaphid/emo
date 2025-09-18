@@ -23,8 +23,8 @@ struct Cli {
     )]
     define: bool,
     #[arg(
-        short = 's',
-        long,
+        short = 'm',
+        long = "memo",
         help = "save a mapping for the search term to a specific emoji or index"
     )]
     save: Option<String>,
@@ -43,8 +43,10 @@ struct Cli {
     random: bool,
     #[arg(long, help = "use AI to select the best emoji for your situation")]
     ai: bool,
-    #[arg(long, help = "specify the AI model to use (default: gemma2:2b)")]
+    #[arg(long, help = "specify the AI model to use")]
     model: Option<String>,
+    #[arg(short = 's', long = "sentence", help = "length of each emoji sentence (use with -c for multiple sentences)")]
+    sentence: Option<usize>,
     #[arg(trailing_var_arg = true)]
     search_terms: Vec<String>,
 }
@@ -69,29 +71,46 @@ fn get_custom_emoji(search_term: &str) -> Result<Option<char>> {
 fn handle_search(search_term: &str, num_results: usize, show_number: bool) -> Result<()> {
     let emojis = load_emojis()?;
 
-    // Get search results
-    let mut results: Vec<(char, &EmojiRecord)> = Vec::new();
-
     // Check for custom emoji mapping first
     if let Some(custom_emoji) = get_custom_emoji(search_term)? {
-        // Create a dummy EmojiRecord for custom mappings
-        // We'll handle this specially in print
-        if !results.is_empty() {
+        if num_results == 1 {
+            // Just return the memo if only 1 result requested
+            if show_number {
+                try_print(&format!("1. {}", custom_emoji));
+            } else {
+                try_print(&format!("{}", custom_emoji));
+            }
+            return Ok(());
+        } else {
+            // Return memo first, then search results (excluding the memo if it appears)
+            if show_number {
+                try_print(&format!("1. {}", custom_emoji));
+            } else {
+                try_print(&format!("{}", custom_emoji));
+            }
+
+            // Get additional results from search (get extra in case some match the memo)
+            let search_results = search(&emojis, search_term, num_results + 5);
+            let mut printed_count = 1; // We already printed the memo
+            for (emoji_char, _) in search_results.iter() {
+                if *emoji_char != custom_emoji {
+                    printed_count += 1;
+                    if show_number {
+                        try_print(&format!("{}. {}", printed_count, emoji_char));
+                    } else {
+                        try_print(&format!("{}", emoji_char));
+                    }
+                    if printed_count >= num_results {
+                        break;
+                    }
+                }
+            }
             return Ok(());
         }
-        // For now, just print the custom emoji directly
-        if show_number {
-            try_print(&format!("1. {}", custom_emoji));
-        } else {
-            try_print(&format!("{}", custom_emoji));
-        }
-        return Ok(());
     }
 
-    // Get regular search results
-    results = search(&emojis, search_term, num_results);
-
-    // Use the existing print function to display results
+    // No memo, just regular search
+    let results = search(&emojis, search_term, num_results);
     print(&results, show_number);
     Ok(())
 }
@@ -265,16 +284,50 @@ fn handle_random() -> Result<()> {
     Ok(())
 }
 
-fn handle_ai_emoji(situation: &str, model: Option<String>) -> Result<()> {
-    let ai_selector = if let Some(model_name) = model {
+fn handle_ai_emoji(situation: &str, model: Option<String>, count: usize) -> Result<()> {
+    // Check config for default model if none specified
+    let model_to_use = if let Some(model_name) = model {
+        Some(model_name)
+    } else {
+        EmojiMappings::load().ok().and_then(|config| config.model)
+    };
+
+    let ai_selector = if let Some(model_name) = model_to_use {
         AiEmojiSelector::with_model(model_name)
     } else {
         AiEmojiSelector::new()
     };
 
-    // Use the LLM for emoji selection - NO FALLBACKS, fail loudly
-    let emoji = ai_selector.select_emoji_llm(situation)?;
-    try_print(&emoji);
+    // Generate multiple different emojis
+    let mut seen_emojis = Vec::new();
+
+    for _ in 0..count {
+        // Pass the already seen emojis to avoid duplicates
+        let emoji = ai_selector.select_emoji_with_exclusions(situation, &seen_emojis)?;
+        try_print(&emoji);
+        seen_emojis.push(emoji);
+    }
+
+    Ok(())
+}
+
+fn handle_ai_sentence(situation: &str, model: Option<String>, length: usize) -> Result<()> {
+    // Check config for default model if none specified
+    let model_to_use = if let Some(model_name) = model {
+        Some(model_name)
+    } else {
+        EmojiMappings::load().ok().and_then(|config| config.model)
+    };
+
+    let ai_selector = if let Some(model_name) = model_to_use {
+        AiEmojiSelector::with_model(model_name)
+    } else {
+        AiEmojiSelector::new()
+    };
+
+    // Generate an emoji sentence describing the situation
+    let sentence = ai_selector.generate_emoji_sentence(situation, length)?;
+    try_print(&sentence);
     Ok(())
 }
 
@@ -304,7 +357,21 @@ fn run() -> Result<()> {
 
     // Handle AI mode
     if cmd.ai {
-        return handle_ai_emoji(search_term, cmd.model);
+        // Handle sentence generation - if both -c and -s are specified, generate multiple sentences
+        if let Some(length) = cmd.sentence {
+            if cmd.count > 1 {
+                // Generate multiple sentences
+                for _ in 0..cmd.count {
+                    handle_ai_sentence(search_term, cmd.model.clone(), length)?;
+                }
+                return Ok(());
+            } else {
+                // Generate single sentence
+                return handle_ai_sentence(search_term, cmd.model, length);
+            }
+        }
+        // Otherwise generate count emojis
+        return handle_ai_emoji(search_term, cmd.model, cmd.count);
     }
 
     // Handle erasing a mapping first

@@ -1,5 +1,6 @@
 pub mod ai;
 pub mod error;
+pub mod generators;
 
 use error::{EmoError, Result};
 use serde::{Deserialize, Serialize};
@@ -14,17 +15,36 @@ pub struct EmojiRecord {
     pub definition: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct EmojiMappings {
     pub mappings: HashMap<String, char>,
+    pub model: Option<String>,  // Optional model in llama/ollama format
+}
+
+impl Default for EmojiMappings {
+    fn default() -> Self {
+        // Parse the bundled default config
+        serde_json::from_str(include_str!("../default_config.json"))
+            .expect("Default config should be valid JSON")
+    }
 }
 
 impl EmojiMappings {
-    pub fn load() -> Result<Self> {
-        let config_dir = dirs::config_dir().ok_or_else(|| {
+    fn get_config_dir() -> Result<std::path::PathBuf> {
+        // Check for XDG_CONFIG_HOME first (for testing and custom configs)
+        if let Ok(xdg_config) = std::env::var("XDG_CONFIG_HOME") {
+            return Ok(std::path::PathBuf::from(xdg_config));
+        }
+
+        // Fall back to system default
+        dirs::config_dir().ok_or_else(|| {
             EmoError::ConfigError("Could not determine config directory".to_string())
-        })?;
-        let path = config_dir.join("emo").join("mappings.json");
+        })
+    }
+
+    pub fn load() -> Result<Self> {
+        let config_dir = Self::get_config_dir()?;
+        let path = config_dir.join("emo").join("config.json");
 
         if path.exists() {
             let file = std::fs::File::open(path)?;
@@ -35,12 +55,10 @@ impl EmojiMappings {
     }
 
     pub fn save(&self) -> Result<()> {
-        let config_dir = dirs::config_dir().ok_or_else(|| {
-            EmoError::ConfigError("Could not determine config directory".to_string())
-        })?;
+        let config_dir = Self::get_config_dir()?;
         let emo_dir = config_dir.join("emo");
         std::fs::create_dir_all(&emo_dir)?;
-        let path = emo_dir.join("mappings.json");
+        let path = emo_dir.join("config.json");
         let file = std::fs::File::create(path)?;
         serde_json::to_writer_pretty(file, self)?;
         Ok(())
